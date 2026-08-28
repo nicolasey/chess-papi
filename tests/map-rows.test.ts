@@ -86,6 +86,18 @@ describe("mapPlayer", () => {
     expect(mapPlayer({ ...REAL_ROW, Fide: "Z" }).ratings.standard.type).toBeNull();
   });
 
+  test("a non-numeric value in a number column is null, never NaN", () => {
+    // NaN survives every arithmetic check downstream and lands in the database
+    // as NULL or 0 depending on the driver. It must not get that far.
+    const player = mapPlayer({ ...REAL_ROW, Elo: "n/a", Ref: "??", ClubRef: "x" });
+
+    expect(player.ratings.standard.elo).toBeNull();
+    expect(player.ref).toBe(0);
+    expect(player.clubRef).toBeNull();
+    expect(Number.isNaN(player.ratings.standard.elo)).toBe(false);
+    expect(Number.isNaN(player.activeUntil)).toBe(false);
+  });
+
   test("parses a date given as a string", () => {
     const player = mapPlayer({ ...REAL_ROW, NeLe: "1982-06-07T00:00:00.000Z" });
     expect(player.birthDate?.getUTCFullYear()).toBe(1982);
@@ -105,6 +117,14 @@ describe("mapTitle", () => {
     expect(mapTitle("gf")).toBe(FideTitle.WGM);
     expect(mapTitle("mf")).toBe(FideTitle.WIM);
     expect(mapTitle("ff")).toBe(FideTitle.WFM);
+  });
+
+  test("decodes a code whatever its case", () => {
+    // The national file is lowercase, but the code is defensive and has to
+    // work, or it should not be there.
+    expect(mapTitle("G ")).toBe(FideTitle.GM);
+    expect(mapTitle("MF")).toBe(FideTitle.WIM);
+    expect(mapTitle("Ff")).toBe(FideTitle.WFM);
   });
 
   test("blank is no title", () => {

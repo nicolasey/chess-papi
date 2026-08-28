@@ -1,6 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
+import MDBReader from "mdb-reader";
 import { countPlayers, openPapi, readClubs, readPlayers, streamPlayers } from "../src/read";
+
+/**
+ * A reader that reports the tables it is told to, and holds no data.
+ *
+ * The "table is missing" branch needs an Access file without a JOUEUR table,
+ * which cannot be produced here — mdb-reader only reads. Borrowing the
+ * prototype satisfies the `instanceof` check so the guard itself is exercised.
+ */
+function readerWithTables(names: string[]): MDBReader {
+  const reader = Object.create(MDBReader.prototype) as MDBReader;
+  reader.getTableNames = () => names;
+  return reader;
+}
 
 /**
  * Integration tests against a real national PAPI file.
@@ -15,6 +29,20 @@ describe("readTable", () => {
   test("says what it found when the file is not a PAPI database", () => {
     // An empty buffer is not an Access file at all.
     expect(() => readClubs(Buffer.alloc(0))).toThrow();
+  });
+
+  test("names the tables it did find when the expected one is absent", () => {
+    // The real case: an Access file that is not a PAPI export. The message has
+    // to say what arrived, or the caller has nothing to go on.
+    const reader = readerWithTables(["CLUB", "TOURNOI"]);
+
+    expect(() => readPlayers(reader)).toThrow(/"JOUEUR" not found/);
+    expect(() => readPlayers(reader)).toThrow(/CLUB, TOURNOI/);
+    expect(() => readPlayers(reader)).toThrow(/Is it a PAPI database\?/);
+  });
+
+  test("handles a file with no tables at all", () => {
+    expect(() => readClubs(readerWithTables([]))).toThrow(/no tables/);
   });
 });
 
@@ -73,4 +101,50 @@ describe.skipIf(!hasFile)("against a real PAPI file", () => {
 
     expect(streamed).toEqual(readPlayers(reader, { offset: 0, limit: 250 }));
   });
+
+  test("offset skips exactly that many rows", () => {
+    const reader = openPapi(buffer);
+    const head = readPlayers(reader, { limit: 110 });
+
+    // Reading from 100 must land on row 100, not back at the start. Without
+    // this, a stream built on offset can repeat its first batch forever.
+    expect(readPlayers(reader, { offset: 100, limit: 10 })).toEqual(head.slice(100, 110));
+    expect(readPlayers(reader, { offset: 1, limit: 1 })).toEqual(head.slice(1, 2));
+    expect(readPlayers(reader, { offset: 100, limit: 10 })).not.toEqual(head.slice(0, 10));
+  });
+
+  test("streaming yields every player exactly once", () => {
+    // The failure this exists for: a stream that quietly drops rows still
+    // looks healthy — the import runs, the data is just incomplete. Checking
+    // the first batch cannot see it. Only the total can.
+    const reader = openPapi(buffer);
+    const expected = countPlayers(reader);
+
+    let seen = 0;
+    let batches = 0;
+    const refs = new Set<number>();
+    for (const batch of streamPlayers(reader, 50_000)) {
+      batches++;
+      seen += batch.length;
+      for (const player of batch) refs.add(player.ref);
+    }
+
+    expect(seen).toBe(expected);
+    expect(batches).toBe(Math.ceil(expected / 50_000));
+    // Distinct refs rule out a batch being served twice to make up the count.
+    expect(refs.size).toBe(expected);
+  }, 60_000);
+
+  test("a batch size that does not divide the total still ends cleanly", () => {
+    const reader = openPapi(buffer);
+    const total = countPlayers(reader);
+    const batchSize = 7_777;
+
+    const sizes = [...streamPlayers(reader, batchSize)].map((b) => b.length);
+
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(total);
+    // Every batch is full except the last, which carries the remainder.
+    expect(sizes.slice(0, -1).every((n) => n === batchSize)).toBe(true);
+    expect(sizes.at(-1)).toBe(total % batchSize || batchSize);
+  }, 60_000);
 });
