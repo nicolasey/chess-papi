@@ -1,0 +1,24 @@
+{
+  "name": "@nicolasey/chess-papi",
+  "version": "0.1.0",
+  "description": "Read players and clubs out of the French Chess Federation PAPI database",
+  "module": "index.ts",
+  "types": "./index.ts",
+  "exports": "./index.ts",
+  "type": "module",
+  "files": ["index.ts", "src"],
+  "keywords": ["chess", "papi", "ffe", "echecs", "mdb", "access", "elo", "fide"],
+  "license": "MIT",
+  "repository": {
+    "url": "git+https://github.com/nicolasey/chess-papi.git"
+  },
+  "dependencies": {
+    "mdb-reader": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
